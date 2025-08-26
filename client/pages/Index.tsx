@@ -30,6 +30,8 @@ import { ThemeSelector } from "@/components/ThemeSelector";
 import { TimerDisplay } from "@/components/TimerDisplay";
 import { TaskDialog } from "@/components/TaskDialog";
 import { SimpleAvatar } from "@/components/EnhancedAvatar";
+import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { CompleteTaskDialog } from "@/components/CompleteTaskDialog";
 import { useNavigate } from "react-router-dom";
 import {
   Calendar,
@@ -71,6 +73,7 @@ interface Task {
   dueDate: Date;
   category: string;
   userId: string;
+  completionRemarks?: string;
 }
 
 interface User {
@@ -95,76 +98,11 @@ export default function Index() {
   const [dashboardItemsPerPage] = useState(6);
   const [viewType, setViewType] = useState<"list" | "board" | "kanban">("list");
   const [customItemsPerPage, setCustomItemsPerPage] = useState(4);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+  const [taskToComplete, setTaskToComplete] = useState<Task | null>(null);
   const navigate = useNavigate();
-
-  // Create sample tasks for demo purposes
-  const createSampleTasks = (userId: string): Task[] => [
-    {
-      id: `${userId}_1`,
-      title: "Design landing page wireframes",
-      description:
-        "Create wireframes for the new product landing page with focus on conversion optimization.",
-      status: "in-progress",
-      priority: "high",
-      timeSpent: 95,
-      estimatedTime: 180,
-      isRunning: false,
-      dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 2), // 2 days from now
-      category: "Design",
-      userId: userId,
-    },
-    {
-      id: `${userId}_2`,
-      title: "Implement user authentication",
-      description:
-        "Set up secure user authentication system with JWT tokens and password hashing.",
-      status: "todo",
-      priority: "high",
-      timeSpent: 0,
-      estimatedTime: 240,
-      isRunning: false,
-      dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 3), // 3 days from now
-      category: "Development",
-      userId: userId,
-    },
-    {
-      id: `${userId}_3`,
-      title: "Write project documentation",
-      description:
-        "Create comprehensive documentation for the API endpoints and component library.",
-      status: "completed",
-      priority: "medium",
-      timeSpent: 120,
-      estimatedTime: 120,
-      isRunning: false,
-      dueDate: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 day ago
-      category: "Documentation",
-      userId: userId,
-    },
-    {
-      id: `${userId}_4`,
-      title: "Code review for feature branch",
-      description:
-        "Review the new feature implementation and provide feedback to the development team.",
-      status: "todo",
-      priority: "medium",
-      timeSpent: 30,
-      estimatedTime: 60,
-      isRunning: false,
-      dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24), // 1 day from now
-      category: "Review",
-      userId: userId,
-    },
-  ];
-
-  // Load demo data
-  const loadDemoData = () => {
-    if (!user) return;
-
-    const demoTasks = createSampleTasks(user.id);
-    setTasks(demoTasks);
-    localStorage.setItem(`tasks_${user.id}`, JSON.stringify(demoTasks));
-  };
 
   // Load user and their specific tasks
   useEffect(() => {
@@ -193,7 +131,7 @@ export default function Index() {
 
   // Save tasks to localStorage whenever tasks change
   useEffect(() => {
-    if (user && tasks.length > 0) {
+    if (user) {
       localStorage.setItem(`tasks_${user.id}`, JSON.stringify(tasks));
     }
   }, [tasks, user]);
@@ -207,11 +145,16 @@ export default function Index() {
   }, []);
 
   const getRunningTaskTime = (task: Task) => {
-    if (!task.isRunning || !task.startTime) return task.timeSpent;
-    const runningTime = Math.floor(
-      (currentTime.getTime() - task.startTime.getTime()) / 1000 / 60,
-    );
-    return task.timeSpent + runningTime;
+    if (!task.isRunning || !task.startTime) {
+      return task.timeSpent;
+    }
+
+    // Calculate running time more precisely
+    const runningTimeMs = currentTime.getTime() - task.startTime.getTime();
+    const runningTimeMinutes = runningTimeMs / 1000 / 60;
+
+    // Return accumulated time + current session time
+    return task.timeSpent + runningTimeMinutes;
   };
 
   const formatTime = (minutes: number) => {
@@ -221,25 +164,40 @@ export default function Index() {
     return `${hours}h ${mins}m`;
   };
 
+  const formatTimeWithSeconds = (minutes: number) => {
+    const totalSeconds = Math.floor(minutes * 60);
+    const hours = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
   const toggleTimer = (taskId: string) => {
     setTasks((prevTasks) =>
       prevTasks.map((task) => {
         if (task.id === taskId) {
           if (task.isRunning) {
-            // Stop timer
+            // Pause timer - accumulate time spent
             const runningTime = Math.floor(
               (currentTime.getTime() - (task.startTime?.getTime() || 0)) /
                 1000 /
                 60,
             );
+            const newTimeSpent = task.timeSpent + runningTime;
+
             return {
               ...task,
               isRunning: false,
-              timeSpent: task.timeSpent + runningTime,
+              timeSpent: newTimeSpent,
               startTime: undefined,
             };
           } else {
-            // Start timer (stop all other timers first)
+            // Resume/Start timer (stop all other timers first)
+
             return {
               ...task,
               isRunning: true,
@@ -247,8 +205,21 @@ export default function Index() {
             };
           }
         }
-        // Stop all other timers
-        return { ...task, isRunning: false, startTime: undefined };
+        // Stop all other timers and accumulate their time
+        if (task.isRunning) {
+          const runningTime = Math.floor(
+            (currentTime.getTime() - (task.startTime?.getTime() || 0)) /
+              1000 /
+              60,
+          );
+          return {
+            ...task,
+            isRunning: false,
+            timeSpent: task.timeSpent + runningTime,
+            startTime: undefined,
+          };
+        }
+        return task;
       }),
     );
   };
@@ -262,10 +233,12 @@ export default function Index() {
               1000 /
               60,
           );
+          const newTimeSpent = task.timeSpent + runningTime;
+
           return {
             ...task,
             isRunning: false,
-            timeSpent: task.timeSpent + runningTime,
+            timeSpent: newTimeSpent,
             startTime: undefined,
           };
         }
@@ -321,30 +294,163 @@ export default function Index() {
     setEditTaskOpen(true);
   };
 
-  const deleteTask = (taskId: string) => {
-    setTasks((prevTasks) => prevTasks.filter((task) => task.id !== taskId));
+  const confirmDeleteTask = (task: Task) => {
+    setTaskToDelete(task);
+    setDeleteConfirmOpen(true);
+  };
+
+  const deleteTask = () => {
+    if (taskToDelete) {
+      setTasks((prevTasks) =>
+        prevTasks.filter((task) => task.id !== taskToDelete.id),
+      );
+      setTaskToDelete(null);
+    }
   };
 
   const toggleTaskStatus = (taskId: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    // If task is being marked as completed, show confirmation dialog
+    if (task.status === "in-progress" || task.status === "todo") {
+      setTaskToComplete(task);
+      setCompleteConfirmOpen(true);
+      return;
+    }
+
+    // For other status changes, proceed directly
     setTasks((prevTasks) =>
-      prevTasks.map((task) => {
-        if (task.id === taskId) {
+      prevTasks.map((t) => {
+        if (t.id === taskId) {
           const newStatus =
-            task.status === "completed"
-              ? "todo"
-              : task.status === "todo"
-                ? "in-progress"
-                : "completed";
+            task.status === "completed" ? "todo" : "in-progress";
           return {
-            ...task,
+            ...t,
             status: newStatus,
             isRunning: false,
             startTime: undefined,
           };
         }
-        return task;
+        return t;
       }),
     );
+  };
+
+  const completeTask = (remarks: string) => {
+    if (taskToComplete) {
+      setTasks((prevTasks) =>
+        prevTasks.map((task) => {
+          if (task.id === taskToComplete.id) {
+            return {
+              ...task,
+              status: "completed" as const,
+              isRunning: false,
+              startTime: undefined,
+              completionRemarks: remarks,
+            };
+          }
+          return task;
+        }),
+      );
+      setTaskToComplete(null);
+    }
+  };
+
+  const createSampleTasks = (): Task[] => {
+    if (!user) return [];
+
+    return [
+      {
+        id: "demo-1",
+        title: "Design landing page wireframes",
+        description:
+          "Create wireframes for the new product landing page with focus on conversion optimization.",
+        status: "in-progress",
+        priority: "high",
+        timeSpent: 95,
+        estimatedTime: 180,
+        isRunning: false,
+        dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 2), // 2 days from now
+        category: "Design",
+        userId: user.id,
+      },
+      {
+        id: "demo-2",
+        title: "Implement user authentication",
+        description:
+          "Set up secure user authentication system with JWT tokens and password hashing.",
+        status: "todo",
+        priority: "high",
+        timeSpent: 0,
+        estimatedTime: 240,
+        isRunning: false,
+        dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 3), // 3 days from now
+        category: "Development",
+        userId: user.id,
+      },
+      {
+        id: "demo-3",
+        title: "Write project documentation",
+        description:
+          "Create comprehensive documentation for the API endpoints and component library.",
+        status: "completed",
+        priority: "medium",
+        timeSpent: 120,
+        estimatedTime: 120,
+        isRunning: false,
+        dueDate: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 day ago
+        category: "Documentation",
+        userId: user.id,
+      },
+      {
+        id: "demo-4",
+        title: "Code review for feature branch",
+        description:
+          "Review the new feature implementation and provide feedback to the development team.",
+        status: "todo",
+        priority: "medium",
+        timeSpent: 30,
+        estimatedTime: 60,
+        isRunning: false,
+        dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24), // 1 day from now
+        category: "Review",
+        userId: user.id,
+      },
+      {
+        id: "demo-5",
+        title: "Update database schema",
+        description:
+          "Migrate database schema to support new user preferences and settings.",
+        status: "todo",
+        priority: "low",
+        timeSpent: 0,
+        estimatedTime: 90,
+        isRunning: false,
+        dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 5), // 5 days from now
+        category: "Development",
+        userId: user.id,
+      },
+      {
+        id: "demo-6",
+        title: "Create user onboarding flow",
+        description:
+          "Design and implement a smooth onboarding experience for new users.",
+        status: "in-progress",
+        priority: "high",
+        timeSpent: 45,
+        estimatedTime: 150,
+        isRunning: false,
+        dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 4), // 4 days from now
+        category: "Design",
+        userId: user.id,
+      },
+    ];
+  };
+
+  const loadDemoData = () => {
+    const sampleTasks = createSampleTasks();
+    setTasks(sampleTasks);
   };
 
   const handleLogout = () => {
@@ -396,6 +502,88 @@ export default function Index() {
     const taskDate = new Date(t.dueDate);
     return taskDate.toDateString() === today.toDateString();
   }).length;
+
+  // Calculate productivity percentage
+  const calculateProductivity = () => {
+    if (totalTasks === 0) return 0;
+
+    const completionRate = (completedTasks / totalTasks) * 100;
+
+    // Factor in time efficiency for completed tasks
+    const completedTasksWithTime = tasks.filter(
+      (t) => t.status === "completed" && t.timeSpent > 0,
+    );
+    const timeEfficiency =
+      completedTasksWithTime.length > 0
+        ? completedTasksWithTime.reduce((acc, task) => {
+            const efficiency =
+              task.estimatedTime > 0
+                ? Math.min((task.estimatedTime / task.timeSpent) * 100, 150) // Cap at 150% efficiency
+                : 100;
+            return acc + efficiency;
+          }, 0) / completedTasksWithTime.length
+        : 100;
+
+    // Combine completion rate (70%) and time efficiency (30%)
+    const productivity = completionRate * 0.7 + timeEfficiency * 0.3;
+    return Math.round(Math.min(productivity, 100)); // Cap at 100%
+  };
+
+  const productivityPercentage = calculateProductivity();
+
+  // Analytics data calculations
+  const getTimeDistributionData = () => {
+    const categoryTimes: { [key: string]: number } = {};
+    const totalTime = tasks.reduce((acc, task) => {
+      const time = getRunningTaskTime(task);
+      categoryTimes[task.category] = (categoryTimes[task.category] || 0) + time;
+      return acc + time;
+    }, 0);
+
+    return Object.entries(categoryTimes)
+      .map(([category, time]) => ({
+        category,
+        time,
+        percentage: totalTime > 0 ? Math.round((time / totalTime) * 100) : 0,
+      }))
+      .sort((a, b) => b.time - a.time);
+  };
+
+  const getWeeklyProgressData = () => {
+    const today = new Date();
+    const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const weekData = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      const dayName = weekDays[date.getDay()];
+
+      // Calculate time spent on tasks for this day
+      const dayTime = tasks.reduce((acc, task) => {
+        const taskDate = new Date(task.dueDate);
+        if (taskDate.toDateString() === date.toDateString()) {
+          return acc + getRunningTaskTime(task);
+        }
+        return acc;
+      }, 0);
+
+      const hours = dayTime / 60;
+      const maxHours = 8; // Assume 8-hour workday
+      const percentage = Math.min((hours / maxHours) * 100, 100);
+
+      weekData.push({
+        day: dayName,
+        hours: hours,
+        percentage: Math.round(percentage),
+      });
+    }
+
+    return weekData;
+  };
+
+  const timeDistribution = getTimeDistributionData();
+  const weeklyProgress = getWeeklyProgressData();
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -590,9 +778,11 @@ export default function Index() {
                   <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">85%</div>
+                  <div className="text-2xl font-bold">
+                    {productivityPercentage}%
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    +12% from last week
+                    Based on completion rate & time efficiency
                   </p>
                 </CardContent>
               </Card>
@@ -677,14 +867,29 @@ export default function Index() {
                                       Running
                                     </Badge>
                                   )}
+                                  {!task.isRunning && task.timeSpent > 0 && (
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-blue-50 text-blue-600 border-blue-200"
+                                    >
+                                      <Clock className="h-3 w-3 mr-1" />
+                                      Paused
+                                    </Badge>
+                                  )}
                                 </div>
                                 <p className="text-sm text-muted-foreground truncate">
                                   {task.description}
                                 </p>
                                 <div className="flex items-center space-x-4 mt-2">
                                   <span className="text-xs text-muted-foreground">
-                                    {formatTime(getRunningTaskTime(task))} /{" "}
-                                    {formatTime(task.estimatedTime)}
+                                    {task.isRunning
+                                      ? formatTimeWithSeconds(
+                                          getRunningTaskTime(task),
+                                        )
+                                      : formatTime(
+                                          getRunningTaskTime(task),
+                                        )}{" "}
+                                    / {formatTime(task.estimatedTime)}
                                   </span>
                                   <Progress
                                     value={
@@ -785,9 +990,31 @@ export default function Index() {
                               <p className="text-sm text-muted-foreground">
                                 No active tasks
                               </p>
-                              <p className="text-xs text-muted-foreground">
+                              <p className="text-xs text-muted-foreground mb-4">
                                 Create a new task to get started
                               </p>
+                              {tasks.length === 0 && (
+                                <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                                  <Dialog
+                                    open={newTaskOpen}
+                                    onOpenChange={setNewTaskOpen}
+                                  >
+                                    <DialogTrigger asChild>
+                                      <Button variant="outline" size="sm">
+                                        <Plus className="h-4 w-4 mr-2" />
+                                        Create First Task
+                                      </Button>
+                                    </DialogTrigger>
+                                  </Dialog>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={loadDemoData}
+                                  >
+                                    Load Demo Tasks
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           )}
                         </>
@@ -982,13 +1209,29 @@ export default function Index() {
                                       Running
                                     </Badge>
                                   )}
+                                  {!task.isRunning && task.timeSpent > 0 && (
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-blue-50 text-blue-600 border-blue-200"
+                                    >
+                                      <Clock className="h-3 w-3 mr-1" />
+                                      Paused
+                                    </Badge>
+                                  )}
                                 </div>
                                 <p className="text-sm text-muted-foreground mt-1">
                                   {task.description}
                                 </p>
                                 <div className="flex items-center space-x-4 mt-3">
                                   <span className="text-xs text-muted-foreground">
-                                    Time: {formatTime(getRunningTaskTime(task))}{" "}
+                                    Time:{" "}
+                                    {task.isRunning
+                                      ? formatTimeWithSeconds(
+                                          getRunningTaskTime(task),
+                                        )
+                                      : formatTime(
+                                          getRunningTaskTime(task),
+                                        )}{" "}
                                     / {formatTime(task.estimatedTime)}
                                   </span>
                                   <span className="text-xs text-muted-foreground">
@@ -1019,7 +1262,7 @@ export default function Index() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => deleteTask(task.id)}
+                                onClick={() => confirmDeleteTask(task)}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -1076,8 +1319,13 @@ export default function Index() {
                                 {task.category}
                               </Badge>
                               <div className="text-xs text-muted-foreground">
-                                Time: {formatTime(getRunningTaskTime(task))} /{" "}
-                                {formatTime(task.estimatedTime)}
+                                Time:{" "}
+                                {task.isRunning
+                                  ? formatTimeWithSeconds(
+                                      getRunningTaskTime(task),
+                                    )
+                                  : formatTime(getRunningTaskTime(task))}{" "}
+                                / {formatTime(task.estimatedTime)}
                               </div>
                               <Progress
                                 value={
@@ -1114,7 +1362,7 @@ export default function Index() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => deleteTask(task.id)}
+                                onClick={() => confirmDeleteTask(task)}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -1199,7 +1447,7 @@ export default function Index() {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => deleteTask(task.id)}
+                                        onClick={() => confirmDeleteTask(task)}
                                       >
                                         <Trash2 className="h-4 w-4" />
                                       </Button>
@@ -1269,7 +1517,13 @@ export default function Index() {
                                           {task.category}
                                         </Badge>
                                         <div className="text-xs text-muted-foreground">
-                                          {formatTime(getRunningTaskTime(task))}{" "}
+                                          {task.isRunning
+                                            ? formatTimeWithSeconds(
+                                                getRunningTaskTime(task),
+                                              )
+                                            : formatTime(
+                                                getRunningTaskTime(task),
+                                              )}{" "}
                                           / {formatTime(task.estimatedTime)}
                                         </div>
                                       </div>
@@ -1305,7 +1559,7 @@ export default function Index() {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => deleteTask(task.id)}
+                                        onClick={() => confirmDeleteTask(task)}
                                       >
                                         <Trash2 className="h-4 w-4" />
                                       </Button>
@@ -1373,7 +1627,7 @@ export default function Index() {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => deleteTask(task.id)}
+                                        onClick={() => confirmDeleteTask(task)}
                                       >
                                         <Trash2 className="h-4 w-4" />
                                       </Button>
@@ -1451,14 +1705,33 @@ export default function Index() {
                         ? `No tasks match "${searchQuery}"`
                         : "Get started by creating your first task"}
                     </p>
-                    <Dialog open={newTaskOpen} onOpenChange={setNewTaskOpen}>
-                      <DialogTrigger asChild>
-                        <Button>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Create Task
+                    {!searchQuery && tasks.length === 0 ? (
+                      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                        <Dialog
+                          open={newTaskOpen}
+                          onOpenChange={setNewTaskOpen}
+                        >
+                          <DialogTrigger asChild>
+                            <Button>
+                              <Plus className="h-4 w-4 mr-2" />
+                              Create First Task
+                            </Button>
+                          </DialogTrigger>
+                        </Dialog>
+                        <Button variant="outline" onClick={loadDemoData}>
+                          Load Demo Tasks
                         </Button>
-                      </DialogTrigger>
-                    </Dialog>
+                      </div>
+                    ) : (
+                      <Dialog open={newTaskOpen} onOpenChange={setNewTaskOpen}>
+                        <DialogTrigger asChild>
+                          <Button>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Create Task
+                          </Button>
+                        </DialogTrigger>
+                      </Dialog>
+                    )}
                   </div>
                 )}
               </TabsContent>
@@ -1471,6 +1744,91 @@ export default function Index() {
           <div className="space-y-6">
             <h2 className="text-2xl font-bold">Analytics & Reports</h2>
 
+            {/* Analytics Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                    <div>
+                      <p className="text-sm font-medium">Completion Rate</p>
+                      <p className="text-2xl font-bold">
+                        {totalTasks > 0
+                          ? Math.round((completedTasks / totalTasks) * 100)
+                          : 0}
+                        %
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center space-x-2">
+                    <Clock className="h-5 w-5 text-blue-600" />
+                    <div>
+                      <p className="text-sm font-medium">Avg. Task Time</p>
+                      <p className="text-2xl font-bold">
+                        {completedTasks > 0
+                          ? formatTime(
+                              Math.round(
+                                tasks
+                                  .filter((t) => t.status === "completed")
+                                  .reduce((acc, t) => acc + t.timeSpent, 0) /
+                                  completedTasks,
+                              ),
+                            )
+                          : "0m"}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center space-x-2">
+                    <TrendingUp className="h-5 w-5 text-orange-600" />
+                    <div>
+                      <p className="text-sm font-medium">Time Efficiency</p>
+                      <p className="text-2xl font-bold">
+                        {(() => {
+                          const completedWithTime = tasks.filter(
+                            (t) =>
+                              t.status === "completed" &&
+                              t.timeSpent > 0 &&
+                              t.estimatedTime > 0,
+                          );
+                          if (completedWithTime.length === 0) return "N/A";
+                          const efficiency =
+                            completedWithTime.reduce(
+                              (acc, t) => acc + t.estimatedTime / t.timeSpent,
+                              0,
+                            ) / completedWithTime.length;
+                          return `${Math.round(efficiency * 100)}%`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center space-x-2">
+                    <Target className="h-5 w-5 text-purple-600" />
+                    <div>
+                      <p className="text-sm font-medium">Active Tasks</p>
+                      <p className="text-2xl font-bold">
+                        {tasks.filter((t) => t.status !== "completed").length}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
             <div className="grid lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
@@ -1481,26 +1839,29 @@ export default function Index() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Development</span>
-                      <span className="text-sm font-medium">240 min</span>
-                    </div>
-                    <Progress value={60} />
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Design</span>
-                      <span className="text-sm font-medium">95 min</span>
-                    </div>
-                    <Progress value={24} />
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Documentation</span>
-                      <span className="text-sm font-medium">120 min</span>
-                    </div>
-                    <Progress value={30} />
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Review</span>
-                      <span className="text-sm font-medium">30 min</span>
-                    </div>
-                    <Progress value={8} />
+                    {timeDistribution.length > 0 ? (
+                      timeDistribution.map((item) => (
+                        <div key={item.category}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm">{item.category}</span>
+                            <span className="text-sm font-medium">
+                              {formatTime(item.time)}
+                            </span>
+                          </div>
+                          <Progress value={item.percentage} className="mt-1" />
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Clock className="h-8 w-8 mx-auto mb-2" />
+                        <p className="text-sm">
+                          No time tracking data available
+                        </p>
+                        <p className="text-xs">
+                          Start working on tasks to see time distribution
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -1514,20 +1875,21 @@ export default function Index() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
-                      (day, i) => (
-                        <div key={day} className="flex items-center space-x-4">
-                          <span className="text-sm w-8">{day}</span>
-                          <Progress
-                            value={[85, 92, 78, 88, 95, 45, 60][i]}
-                            className="flex-1"
-                          />
-                          <span className="text-sm font-medium">
-                            {[6.8, 7.4, 6.2, 7.0, 7.6, 3.6, 4.8][i]}h
-                          </span>
-                        </div>
-                      ),
-                    )}
+                    {weeklyProgress.map((dayData) => (
+                      <div
+                        key={dayData.day}
+                        className="flex items-center space-x-4"
+                      >
+                        <span className="text-sm w-8">{dayData.day}</span>
+                        <Progress
+                          value={dayData.percentage}
+                          className="flex-1"
+                        />
+                        <span className="text-sm font-medium">
+                          {dayData.hours.toFixed(1)}h
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
@@ -1549,6 +1911,21 @@ export default function Index() {
         onSubmit={updateTask}
         task={editingTask || undefined}
         isEdit={true}
+      />
+
+      {/* Confirmation Dialogs */}
+      <DeleteConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        onConfirm={deleteTask}
+        taskTitle={taskToDelete?.title || ""}
+      />
+
+      <CompleteTaskDialog
+        open={completeConfirmOpen}
+        onOpenChange={setCompleteConfirmOpen}
+        onConfirm={completeTask}
+        task={taskToComplete}
       />
     </div>
   );

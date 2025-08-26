@@ -1,24 +1,66 @@
-import React from 'react';
-import { Moon, Sun, Monitor, Palette, Check } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useTheme } from './ThemeProvider';
+import React, { useCallback, useMemo } from "react";
+import { Moon, Sun, Monitor, Palette, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { useTheme } from "./ThemeProvider";
 
-export function ThemeSelector() {
-  const { theme, setTheme, colorTheme, setColorTheme, colorThemes } = useTheme();
+export const ThemeSelector = React.memo(() => {
+  const { theme, setTheme, colorTheme, setColorTheme, colorThemes } =
+    useTheme();
 
-  const getThemeIcon = () => {
+  const getThemeIcon = useCallback(() => {
     switch (theme) {
-      case 'light':
+      case "light":
         return <Sun className="h-4 w-4" />;
-      case 'dark':
+      case "dark":
         return <Moon className="h-4 w-4" />;
-      case 'system':
+      case "system":
         return <Monitor className="h-4 w-4" />;
       default:
         return <Monitor className="h-4 w-4" />;
     }
-  };
+  }, [theme]);
+
+  const handleThemeChange = useCallback(
+    (newTheme: "light" | "dark" | "system") => {
+      setTheme(newTheme);
+    },
+    [setTheme],
+  );
+
+  const handleColorChange = useCallback(
+    (color: any) => {
+      setColorTheme(color);
+    },
+    [setColorTheme],
+  );
+
+  const colorButtons = useMemo(
+    () =>
+      colorThemes.map((color) => (
+        <Button
+          key={color.name}
+          variant="outline"
+          size="sm"
+          onClick={() => handleColorChange(color)}
+          className="justify-start"
+        >
+          <div
+            className="h-4 w-4 rounded-full mr-2"
+            style={{ backgroundColor: color.primary }}
+          />
+          {color.name}
+          {colorTheme.name === color.name && (
+            <Check className="h-4 w-4 ml-auto" />
+          )}
+        </Button>
+      )),
+    [colorThemes, colorTheme.name, handleColorChange],
+  );
 
   return (
     <Popover>
@@ -34,27 +76,27 @@ export function ThemeSelector() {
             <h4 className="font-medium leading-none mb-3">Appearance</h4>
             <div className="grid grid-cols-3 gap-2">
               <Button
-                variant={theme === 'light' ? 'default' : 'outline'}
+                variant={theme === "light" ? "default" : "outline"}
                 size="sm"
-                onClick={() => setTheme('light')}
+                onClick={() => handleThemeChange("light")}
                 className="justify-start"
               >
                 <Sun className="h-4 w-4 mr-2" />
                 Light
               </Button>
               <Button
-                variant={theme === 'dark' ? 'default' : 'outline'}
+                variant={theme === "dark" ? "default" : "outline"}
                 size="sm"
-                onClick={() => setTheme('dark')}
+                onClick={() => handleThemeChange("dark")}
                 className="justify-start"
               >
                 <Moon className="h-4 w-4 mr-2" />
                 Dark
               </Button>
               <Button
-                variant={theme === 'system' ? 'default' : 'outline'}
+                variant={theme === "system" ? "default" : "outline"}
                 size="sm"
-                onClick={() => setTheme('system')}
+                onClick={() => handleThemeChange("system")}
                 className="justify-start"
               >
                 <Monitor className="h-4 w-4 mr-2" />
@@ -62,32 +104,15 @@ export function ThemeSelector() {
               </Button>
             </div>
           </div>
-          
+
           <div>
             <h4 className="font-medium leading-none mb-3">Color Theme</h4>
-            <div className="grid grid-cols-2 gap-2">
-              {colorThemes.map((color) => (
-                <Button
-                  key={color.name}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setColorTheme(color)}
-                  className="justify-start"
-                >
-                  <div
-                    className="h-4 w-4 rounded-full mr-2"
-                    style={{ backgroundColor: color.primary }}
-                  />
-                  {color.name}
-                  {colorTheme.name === color.name && (
-                    <Check className="h-4 w-4 ml-auto" />
-                  )}
-                </Button>
-              ))}
-            </div>
+            <div className="grid grid-cols-2 gap-2">{colorButtons}</div>
           </div>
         </div>
       </PopoverContent>
     </Popover>
   );
-}
+});
+
+ThemeSelector.displayName = "ThemeSelector";
