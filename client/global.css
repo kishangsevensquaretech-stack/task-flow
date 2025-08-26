@@ -98,3 +98,76 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ResizeObserver and performance optimizations */
+* {
+  /* Prevent layout shifts */
+  box-sizing: border-box;
+}
+
+/* Optimize animations to prevent ResizeObserver conflicts */
+@media (prefers-reduced-motion: no-preference) {
+  .animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+}
+
+/* Ensure consistent sizing for dialog and popover content */
+[data-radix-popper-content-wrapper] {
+  transform-origin: var(--radix-popper-transform-origin);
+  will-change: transform;
+}
+
+/* Optimize scrollable areas */
+[data-radix-scroll-area-viewport] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+[data-radix-scroll-area-viewport]::-webkit-scrollbar {
+  display: none;
+}
+
+/* Prevent unnecessary repaints on hover states */
+.hover\\:shadow-md:hover {
+  transition: box-shadow 0.15s ease-in-out;
+}
+
+/* Optimize form controls for consistent sizing */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Ensure smooth transitions without triggering ResizeObserver */
+.transition-colors {
+  transition-property: color, background-color, border-color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Prevent content jump during loading */
+.loading-skeleton {
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 1;
+  }
+}
